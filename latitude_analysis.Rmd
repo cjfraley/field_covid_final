@@ -1,0 +1,27 @@
+---
+title: "COVID-19 Morbidity and Seasonal Trends"
+author: "Charles Fraley"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+# Goal of Analysis
+
+Find the degree to which seasonal trends influence COVID 19 morbidity.
+
+# Initial Data Intake
+<!-- Was the source and a short description of the data provided? -->
+
+
+# Method
+Map each area of examination to their latitude
+Fit yearly data to $y=C_{periodic\ amplitude}*sin(t/.5yr+C_{offset})+C_{yearly\ average}+C_{trend\ for\ that\ year}*t$
+Correlate latitude of countries to their periodic amplitude
+
+# Conclusion
+
+## Bias and Mitigation
