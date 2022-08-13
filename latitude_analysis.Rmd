@@ -7,20 +7,82 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F)
+library(tidyverse)
+library(forecast)
+library(mgcv)
+library(reshape)
+library(stringi)
+library(stringr)
+library(knitr)
 ```
 
 # Goal of Analysis
 
 Find the degree to which seasonal trends influence COVID 19 morbidity.
 
-# Initial Data Intake
+# Data
 <!-- Was the source and a short description of the data provided? -->
-
-
+## Intake and Source
+```{r}
+url_in <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/"
+time_path <- "csse_covid_19_time_series/time_series_covid19_"
+time_filenames <- c(
+    "confirmed_US.csv",
+    "confirmed_global.csv",
+    "deaths_US.csv",
+    "deaths_global.csv" #,
+    # "recovered_global.csv"
+)
+for (branch_url in time_filenames) {
+  time_data <- read.csv(
+    url(
+      paste(url_in,time_path,branch_url,sep="")
+      )
+    )
+  assign(
+    substring(branch_url,1,nchar(branch_url)-4),
+    time_data
+    )
+}
+```
 # Method
+
+1. Get the row in confirmed
+```{r}
+confirmed_row <- confirmed_US[1,]
+```
+2. Get the row in deaths
+```{r}
+death_row <- deaths_US[1,]
+```
+3. New dataframe:
+```{r}
+working_df <- data.frame(
+   confirmed=as.numeric(
+      t(confirmed_US[1,])[-(1:11)]
+     ),
+   dead=as.numeric(t(deaths_US[1,])[-(1:12)])
+)
+working_df <- mutate(working_df,ratio=dead/confirmed)
+```
+    - column names: concatenation of the 
+    - row names: dates
+    - Cells record ratio of $deaths/confirmed$ day by day
+    
+```{r eval=FALSE}
+ggplot(working_df,x=row.names(working_df),y=)
+```
+
 Map each area of examination to their latitude
 Fit yearly data to $y=C_{periodic\ amplitude}*sin(t/.5yr+C_{offset})+C_{yearly\ average}+C_{trend\ for\ that\ year}*t$
+
 Correlate latitude of countries to their periodic amplitude
+
+Consider county, state and country.
+
+## Average across years
+
+## Each year as separate consideration
 
 # Conclusion
 
