@@ -19,20 +19,20 @@ library(lubridate)
 
 # Goal of Analysis
 
-Find the degree to which seasonal trends influence COVID 19 morbidity.
+I'll be evaluating if there's a latitude influenced seasonal aspect to COVID mortality rates. This question is influenced by the knowledge that weather and climate has an influence on respiratory illness. If COVID deaths are largely related to respiratory distress, there may be a notable trend.
 
 # Data
 <!-- Was the source and a short description of the data provided? -->
 ## Intake and Source
-```{r}
+I'll be using the [time series COVID-19 Data](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series) from the Center for Systems Science and Engineering at Johns Hopkins.
+```{r echo=T}
 url_in <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/"
 time_path <- "csse_covid_19_time_series/time_series_covid19_"
 time_filenames <- c(
     "confirmed_US.csv",
-    "confirmed_global.csv",
-    "deaths_US.csv",
-    "deaths_global.csv" #,
-    # "recovered_global.csv"
+    #"confirmed_global.csv",
+    #"deaths_global.csv",
+    "deaths_US.csv"
 )
 for (branch_url in time_filenames) {
   time_data <- read.csv(
@@ -48,15 +48,8 @@ for (branch_url in time_filenames) {
 ```
 # Demonstration of Method
 
-1. Get the row in confirmed
-```{r}
-confirmed_row <- confirmed_US[1,]
-```
-2. Get the row in deaths
-```{r}
-death_row <- deaths_US[1,]
-```
-3. New dataframe:
+I will be demonstrating my analysis using a single data entry.
+1. Get the corresponding rows in confirmed and death. They added
 ```{r}
 working_df <- data.frame(
   date = colnames(deaths_US[-(1:12)]),
@@ -121,7 +114,7 @@ working_df <- mutate(working_df, year=year(date))
 2. Similar handling except separate by year
 ```{r}
 model2020 <- nls(
-  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  ratio ~ a*sin(2*pi*(no_year+c)/365)+b, 
   data=filter(working_df,year==2020),
   start=list(
     a=.001,
@@ -131,7 +124,7 @@ model2020 <- nls(
   )
 
 model2021 <- nls(
-  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  ratio ~ a*sin(2*pi*(no_year+c)/365)+b, 
   data=filter(working_df,year==2021),
   start=list(
     a=.001,
@@ -140,7 +133,7 @@ model2021 <- nls(
   )
   )
 model2022 <- nls(
-  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  ratio ~ a*sin(2*pi*(no_year+c)/365)+b, 
   data=filter(working_df,year==2022),
   start=list(
     a=.001,
@@ -195,7 +188,7 @@ working_df <- data.frame(
 )
 ```
 ```{r}
-for (rownum in 1:row_number(us_agg)) {
+for (rownum in 1:nrow(us_agg)) {
   if (grepl("Out of",confirmed_US$Admin2[rownum]) || grepl("Unassigned",confirmed_US$Admin2[rownum]) ){
     next
   }
@@ -231,27 +224,45 @@ for (rownum in 1:row_number(us_agg)) {
   # na.omit(working_df)
 }
 ```
+```{r eval=F}
+us_agg <- na.omit(us_agg)
+us_agg$amp[us_agg$amp <0 & us_agg$off >= 365/2 ] <- -1*us_agg$amp
+us_agg$off[us_agg$amp <0 & us_agg$off >= 365/2 ] <- us_agg$off-365/2
+```
 ```{r}
-us_agg <- mutate(us_agg,amp_max=amp+amp_err)
+us_agg <- mutate(us_agg,amp_max=amp+amp_err) %>%mutate(amp_min=amp-amp_err)
 ```
 ```{r}
 us_lat_plot <- ggplot(
   us_agg,
   mapping =aes(x=latitude,y=abs(amp)))+
+  coord_cartesian(xlim=c(12,50),ylim=c(0,.01))+
   geom_point(alpha=.01)
 # +geom_errorbar(mapping=aes(x=Latitude,))
 ```
 
-## Correlate latitude of counties to their periodic amplitude
-
-Consider county, state and country.
+## Correlation latitude of counties to their periodic amplitude
+```{r}
+us_lat_plot
+```
 
 # Conclusion
+It doesn't appear there is a relation between periodic changes in mortality and latitude based on my model.
+This is encouraged by the lack of correlation in the offset. If there was a shared seasonal periodicity, there would be similarity across latitude of the offset of the period.
+```{r}
+ggplot(
+     us_agg,
+     mapping =aes(x=latitude,y=off))+
+     geom_point(alpha=.1)
+```
 
-## Methodological Assumptions
+ ## Methodological Assumptions
 
 - Period of 1 year
 - Skip past 0 deaths
+
+# Further questions
+Consider state and country analysis.
 
 ## Bias and Mitigation
 # TODO
