@@ -14,6 +14,7 @@ library(reshape)
 library(stringi)
 library(stringr)
 library(knitr)
+library(lubridate)
 ```
 
 # Goal of Analysis
@@ -45,7 +46,7 @@ for (branch_url in time_filenames) {
     )
 }
 ```
-# Method
+# Demonstration of Method
 
 1. Get the row in confirmed
 ```{r}
@@ -58,32 +59,201 @@ death_row <- deaths_US[1,]
 3. New dataframe:
 ```{r}
 working_df <- data.frame(
-   confirmed=as.numeric(
+  date = colnames(deaths_US[-(1:12)]),
+  confirmed=as.numeric(
       t(confirmed_US[1,])[-(1:11)]
      ),
-   dead=as.numeric(t(deaths_US[1,])[-(1:12)])
+  dead=as.numeric(t(deaths_US[1,])[-(1:12)])
 )
+working_df$date <- mdy(substring(working_df$date,2))
 working_df <- mutate(working_df,ratio=dead/confirmed)
 ```
     - column names: concatenation of the 
     - row names: dates
     - Cells record ratio of $deaths/confirmed$ day by day
-    
-```{r eval=FALSE}
-ggplot(working_df,x=row.names(working_df),y=)
+
+```{r eval=T}
+full_demo <- ggplot(working_df,aes(x=date,y=ratio))+geom_point()
+full_demo
 ```
 
 Map each area of examination to their latitude
-Fit yearly data to $y=C_{periodic\ amplitude}*sin(t/.5yr+C_{offset})+C_{yearly\ average}+C_{trend\ for\ that\ year}*t$
+Fit yearly data to $y=C_{periodic\ amplitude}*sin(\frac{2\pi}{1yr} t+C_{offset})+C_{yearly\ average}+C_{trend\ for\ that\ year}*t$
 
-Correlate latitude of countries to their periodic amplitude
+## All Years on Same Axis
 
-Consider county, state and country.
+1. Strip years from date.
+```{r}
+working_df <- mutate(working_df,
+                     no_year=yday(date)
+)
+```
+```{r}
+demoplot <- ggplot(na.omit(working_df),aes(x=no_year,y=ratio))+geom_point()
+```
+```{r eval=T}
+working_df <- na.omit(working_df)
+demo_model <- nls(
+  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  data=working_df,
+  start=list(
+    a=.001,
+    b=.012,
+    c=-30
+    )
+  )
+print(summary(demo_model))
 
-## Average across years
+working_df$fit <-  predict(demo_model,data=working_df$no_year, interval='confidence')
+demoplot <- demoplot+geom_line(aes(no_year,working_df$fit))
+# demoplot <- demoplot+geom_ribbon(aes(ymin=lwr,ymax=upr), alpha=0.3)
+```
+```{r}
+demoplot
+```
 
 ## Each year as separate consideration
 
+1. Separate year as own variable
+```{r}
+working_df <- mutate(working_df, year=year(date))
+```
+2. Similar handling except separate by year
+```{r}
+model2020 <- nls(
+  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  data=filter(working_df,year==2020),
+  start=list(
+    a=.001,
+    b=.012,
+    c=-30
+  )
+  )
+
+model2021 <- nls(
+  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  data=filter(working_df,year==2021),
+  start=list(
+    a=.001,
+    b=.012,
+    c=-30
+  )
+  )
+model2022 <- nls(
+  ratio ~ a*sin((2*pi*no_year+c)/365)+b, 
+  data=filter(working_df,year==2022),
+  start=list(
+    a=.001,
+    b=.012,
+    c=-30
+  )
+  )
+```
+
+```{r}
+working_df$split_fit <-  unlist(
+  c(
+    predict(
+      model2020,
+      data=working_df$date, 
+      interval='confidence'
+    ),
+    predict(
+      model2021,
+      data=working_df$date, 
+      interval='confidence'
+    ),
+    predict(
+      model2022,
+      data=working_df$date, 
+      interval='confidence'
+    )
+  )
+)
+
+split_demo <- ggplot(working_df,aes(x=date,y=ratio))+geom_point()
+
+split_demo <- split_demo+
+  geom_line(aes(date,working_df$split_fit))
+split_demo
+```
+# Analysis
+For measuring across multiple locations I'll be using the all as one year analysis. Additionally I will be disregarding the ratio values of 0 at the beginning of the pandemic as these are clearly an issue of how data was collected when COVID emerged. From each county, I need the value for periodic amplitude for the model and the latitude.
+
+```{r}
+us_agg <- data.frame(
+  uid=confirmed_US$UID,
+  combined_key=confirmed_US$Combined_Key,
+  latitude=confirmed_US$Lat,
+  amp=rep(NA,nrow(confirmed_US)),
+  amp_err=rep(NA,nrow(confirmed_US)),
+  off=rep(NA,nrow(confirmed_US)),
+  off_err=rep(NA,nrow(confirmed_US))
+)
+working_df <- data.frame(
+    ydays = yday(mdy(substring(colnames(deaths_US[-(1:12)]),2)))
+)
+```
+```{r}
+for (rownum in 1:row_number(us_agg)) {
+  if (grepl("Out of",confirmed_US$Admin2[rownum]) || grepl("Unassigned",confirmed_US$Admin2[rownum]) ){
+    next
+  }
+  # print(rownum)
+  working_df$ratio <- 
+      as.numeric(t(deaths_US[rownum,])[-(1:12)])/
+      as.numeric(t(confirmed_US[rownum,])[-(1:11)])
+  skip <- F
+  tryCatch(
+    work_fit <-nls(
+    ratio ~ a*sin((2*pi*(ydays+c))/365)+b, 
+    working_df[
+      is.finite(working_df$ratio) & working_df$ratio!=0,
+    ],
+    start=list(
+        a=.001,
+        b=.012,
+        c=-30
+      )
+    ),
+    error = function(e) {
+      skip <- T
+    }
+  )
+  if(skip) {
+    next
+  }
+  mod_sum <-summary(work_fit)
+  us_agg$amp[rownum] <- coef(work_fit)['a']
+  us_agg$amp_err[rownum] <- mod_sum$coefficients[,2]['a']
+  us_agg$off[rownum] <- coef(work_fit)['c']%%365
+  us_agg$off_err[rownum] <- mod_sum$coefficients[,2]['c']
+  # na.omit(working_df)
+}
+```
+```{r}
+us_agg <- mutate(us_agg,amp_max=amp+amp_err)
+```
+```{r}
+us_lat_plot <- ggplot(
+  us_agg,
+  mapping =aes(x=latitude,y=abs(amp)))+
+  geom_point(alpha=.01)
+# +geom_errorbar(mapping=aes(x=Latitude,))
+```
+
+## Correlate latitude of counties to their periodic amplitude
+
+Consider county, state and country.
+
 # Conclusion
 
+## Methodological Assumptions
+
+- Period of 1 year
+- Skip past 0 deaths
+
 ## Bias and Mitigation
+# TODO
+Suppress warnings
+https://stackoverflow.com/questions/13286531/how-to-suppress-warnings-when-plotting-with-ggplot
