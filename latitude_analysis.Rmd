@@ -65,9 +65,7 @@ working_df <- data.frame(
 working_df$date <- mdy(substring(working_df$date,2))
 working_df <- mutate(working_df,ratio=dead/confirmed)
 working_df <- mutate(working_df,datenum=as.numeric(date-mdy("12-31-2019")))
-working_df <- mutate(working_df,
-                     no_year=yday(date)
-)
+working_df <- mutate(working_df,no_year=yday(date))
 working_df <- na.omit(working_df)
 # is.finite(working_df$ratio) & working_df$ratio!=0
 
@@ -91,10 +89,12 @@ I considered 2 approaches to this question:
 This would be the most intuitive way to handle it, handling all data as a single trend that can be considered.
 <!-- TODO figure out what's with this -->
 From our working dataframe assign a fit:
-```{r eval=T}
+
+<details>
+```{r eval=T, echo=T}
 full_model <- nls(
   ratio ~ a*sin((2*pi*datenum+b)/365)-c*datenum+d, 
-  data=working_df,
+  data=filter(working_df,is.finite(ratio),ratio!=0),
   start=list(
     a=.001,
     b=-30,
@@ -104,15 +104,15 @@ full_model <- nls(
   )
 print(summary(full_model))
 ```
-```{r}
+</details>
 
-fit <- predict(
+The fit plotted against raw data.
+```{r}
+working_df$fit <- predict(
   full_model,
-  data=working_df$datenum, 
+  working_df, 
   interval='confidence'
   )
-working_df$fit <- fit
-print(summary(fit))
 full_demo+geom_line(aes(date,working_df$fit),color="blue")
 ```
 
@@ -120,17 +120,19 @@ full_demo+geom_line(aes(date,working_df$fit),color="blue")
 To avoid trying to model larger trends in the pandemic, we can take each year as a separate thing to model and use a more basic linear trend to mitigate that effect.
 
 1. Separate year as own variable
-```{r}
+```{r echo=T}
 working_df <- mutate(working_df, year=year(date))
 ```
 2. Similar handling except run 3 times. Separating model by year.
-```{r}
+
+<details>
+```{r echo=T}
 model2020 <- nls(
   ratio ~ a*sin((2*pi*no_year+b)/365)-c*no_year+d, 
-  data=filter(working_df,year==2020),
+  data=filter(working_df,is.finite(ratio),ratio!=0,year==2020),
   start=list(
     a=.001,
-    b=-30,
+    b=0,
     c=.001,
     d=.012
     )
@@ -138,7 +140,7 @@ model2020 <- nls(
 print(summary(model2020))
 model2021 <- nls(
   ratio ~ a*sin((2*pi*no_year+b)/365)-c*no_year+d, 
-  data=filter(working_df,year==2021),
+  data=filter(working_df,is.finite(ratio),ratio!=0,year==2021),
   start=list(
     a=.001,
     b=-30,
@@ -149,7 +151,7 @@ model2021 <- nls(
 print(summary(model2021))
 model2022 <- nls(
   ratio ~ a*sin((2*pi*no_year+b)/365)-c*no_year+d, 
-  data=filter(working_df,year==2022),
+  data=filter(working_df,is.finite(ratio),ratio!=0,year==2022),
   start=list(
     a=.001,
     b=-30,
@@ -159,23 +161,25 @@ model2022 <- nls(
   )
 print(summary(model2022))
 ```
+</details>
 
-```{r}
+<details>
+```{r echo=T}
 working_df$split_fit <-  unlist(
   c(
     predict(
       model2020,
-      data=working_df$date, 
+      filter(working_df,year==2020), 
       interval='confidence'
     ),
     predict(
       model2021,
-      data=working_df$date, 
+      filter(working_df,year==2021), 
       interval='confidence'
     ),
     predict(
       model2022,
-      data=working_df$date, 
+      filter(working_df,year==2022), 
       interval='confidence'
     )
   )
@@ -185,18 +189,25 @@ split_demo <- ggplot(working_df,aes(x=date,y=ratio))+geom_point()
 
 split_demo <- split_demo+
   geom_line(aes(date,working_df$split_fit),color="red")
+
+```
+</details>
+
+```{r}
 split_demo
 ```
 
-I did not use this in final analysis as the split is artificial and arbitrary.
+I did not use this in final analysis as the split is artificial and arbitrary. I worry that it may introduce unintended artifacts or artificial patterns.
 
 ## 3. Combined Year
 
 I take every data point as a part of a single year. The independent variable is only the number of days since the start of the year.
-```{r}
+```{r echo=T}
 demoplot <- ggplot(working_df,aes(x=no_year,y=ratio))+geom_point(alpha=.1)
 ```
-```{r eval=T}
+
+<details>
+```{r echo=T}
 working_df <- na.omit(working_df)
 demo_model <- nls(
   ratio ~ a*sin((2*pi*no_year+b)/365)-c*no_year+d, 
@@ -214,17 +225,21 @@ working_df$fit <-  predict(demo_model,data=working_df$no_year, interval='confide
 demoplot <- demoplot+geom_line(aes(no_year,working_df$fit),color="green")
 # demoplot <- demoplot+geom_ribbon(aes(ymin=lwr,ymax=upr), alpha=0.3)
 ```
+</details>
+
 ```{r}
 demoplot
 ```
 
 # Analysis
-Map each area of examination to their latitude
 
-For measuring across multiple locations I'll be using the all as one year analysis. Additionally I will be disregarding the ratio values of 0 at the beginning of the pandemic as these are clearly an issue of how data was collected when COVID emerged. From each county, I need the value for periodic amplitude for the model and the latitude.
+So the goal of the data transformation/analysis is to map each area of examination to its latitude. As an extra verification for periodicity, I will be checking the values of the offset. If there's a shared periodic variability, the offset should be the same across latitudes.
+
+Additionally I will be disregarding the ratio values of 0 at the beginning of the pandemic as these are clearly an issue of how data was collected when COVID emerged. 
 
 ## Collective Curve
 
+This is the analysis of the whole timeline on a single unmodified axis.
 ```{r}
 df_rows <- nrow(confirmed_US)
 singtime <- data.frame(
@@ -241,7 +256,6 @@ working_df <- data.frame(
       mdy(substring(colnames(deaths_US[-(1:12)]),2))-
         mdy("12-31-2019"))
 )
-
 ```
 
 ```{r}
@@ -257,7 +271,7 @@ for (rownum in 1:nrow(singtime)) {
   tryCatch(
     work_fit <-nls(
       ratio ~ a*sin((2*pi*datenum+b)/365)-c*datenum+d, 
-      data=working_df,
+      data=filter(working_df, is.finite(ratio),ratio!=0),
       start=list(
         a=.001,
         b=-30,
@@ -275,9 +289,8 @@ for (rownum in 1:nrow(singtime)) {
   mod_sum <-summary(work_fit)
   singtime$amp[rownum] <- coef(work_fit)['a']
   singtime$amp_err[rownum] <- mod_sum$coefficients[,2]['a']
-  singtime$off[rownum] <- coef(work_fit)['c']%%365
-  singtime$off_err[rownum] <- mod_sum$coefficients[,2]['c']
-  # na.omit(working_df)
+  singtime$off[rownum] <- coef(work_fit)['b']%%365
+  singtime$off_err[rownum] <- mod_sum$coefficients[,2]['b']
 }
 
 ```
@@ -291,10 +304,11 @@ sing_lat_plot <- ggplot(
 suppressWarnings(sing_lat_plot)
 ```
 ```{r}
-ggplot(
+suppressWarnings(ggplot(
      singtime,
-     mapping =aes(x=latitude,y=off))+
-     geom_point(alpha=.1)
+     aes(x=off%%365)
+     )+
+     geom_histogram(binwidth=10))
 ```
 
 ## Combined Year
@@ -345,63 +359,71 @@ for (rownum in 1:nrow(allin1)) {
   mod_sum <-summary(work_fit)
   allin1$amp[rownum] <- coef(work_fit)['a']
   allin1$amp_err[rownum] <- mod_sum$coefficients[,2]['a']
-  allin1$off[rownum] <- coef(work_fit)['c']%%365
-  allin1$off_err[rownum] <- mod_sum$coefficients[,2]['c']
+  allin1$off[rownum] <- coef(work_fit)['b']%%365
+  allin1$off_err[rownum] <- mod_sum$coefficients[,2]['b']
   # na.omit(working_df)
 }
 ```
-```{r eval=F}
+```{r eval=T}
 allin1 <- na.omit(allin1)
-allin1$amp[allin1$amp <0 & allin1$off >= 365/2 ] <- -1*allin1$amp
-allin1$off[allin1$amp <0 & allin1$off >= 365/2 ] <- allin1$off-365/2
+allin1$amp[allin1$amp <0 & allin1$off >= 365/2 ] <- -1*allin1$amp[allin1$amp <0 & allin1$off >= 365/2 ]
+allin1$off[allin1$amp <0 & allin1$off >= 365/2 ] <- allin1$off[allin1$amp <0 & allin1$off >= 365/2 ]-365/2
 ```
 ```{r}
 allin1 <- mutate(allin1,amp_max=amp+amp_err) %>%mutate(amp_min=amp-amp_err)
 ```
 
-No apparent correlation.
+No apparent correlation.  
 ```{r}
 all_lat_plot <- ggplot(
   allin1,
   mapping =aes(x=latitude,y=abs(amp)))+
   coord_cartesian(xlim=c(12,50),ylim=c(0,.01))+
-  geom_point(alpha=.01)
+  geom_point(alpha=.05)
 # +geom_errorbar(mapping=aes(x=Latitude,))
 suppressWarnings(all_lat_plot)
 ```
-If there was a shared seasonal periodicity, there would be similarity across latitude of the offset of the period.
-```{r}
-ggplot(
-     allin1,
-     mapping =aes(x=latitude,y=off))+
-     geom_point(alpha=.1)
-```
 
-### Correlation latitude of counties to their periodic amplitude
 ```{r}
-all_lat_plot
+suppressWarnings(ggplot(
+     singtime,
+     aes(x=off%%365)
+     )+
+     geom_histogram(binwidth=10))
 ```
 
 # Conclusion
-It doesn't appear there is a relation between periodic changes in mortality and latitude based on my model.
-This is encouraged by the lack of correlation in the offset. 
+Correlation test of amplitute to latitude using combined year evaluation:
+```{r}
+cor.test(allin1$latitude,allin1$amp)
+```
+
+Correlation test of amplitute to latitude using normal date evaluation:
+```{r}
+cor.test(singtime$latitude,singtime$amp)
+```
+
+Based on the above correlation test, it doesn't appear there is a relation between periodic changes in mortality and latitude based on my model. 
+
+Similarly, there is no apparent collection of offsets on a single point which suggests there's no shared periodicity.
 
 ## Methodological Considerations
 
-US focus because going across country lines means even more variability. Special consideration would need to be given to vaccine availability and differences in national health care. This would be beyond the scope of this analysis.
+I used only US data because going across country lines means even more variability. Special consideration would need to be given to vaccine availability and differences in national health care. This would be beyond the scope of this analysis.
 
-### Assumptions
+I only focused on a period of 1 year. While this would correct for annual seasonal approach, it does not take into account the possibility of a 2 year period. This could take the form of $y=abs(sin(\frac{2\pi*d}{2*365}))$.
 
-- Period of 1 year
-- Skip past 0 deaths
-
-# Further questions
-Consider state and country analysis.
-Better larger trend mitigation. Global averages/regional neighbor average.
+I ignored $deaths/confirmed\ cases$ values of 0 as I believed these are invalid and more of a reflection of how these points were measured than the reality of the situation.
 
 ## Bias and Mitigation
 
-# TODO
-- Fix the offset amplitude flip mutation
-- offset %%365 or %%(365/2) comparison
-- [Suppress warnings](https://stackoverflow.com/questions/13286531/how-to-suppress-warnings-when-plotting-with-ggplot)
+### Data
+Confirmed and deaths data, while probably fantastic also has to rely on local reports. 
+
+### Personal
+I think I managed to neutralize most of my personal biases by choosing a topic which handles the whole of the United States as a single method. My feelings on differing regions of the US should be neutralized by all of them being treated only as latitudes.
+
+# Further questions
+- While using strictly the US avoids international variation, there is quite a bit of state by state difference. If there is a belief that this hypothesis is worth continued investigation, limiting comparison within a state may be useful.
+- Additionally, it may be worth correlating with more specific weather data.
+- It could potentially help my results to better cancel out larger trends. One could use the global or country wide average trends for example.
